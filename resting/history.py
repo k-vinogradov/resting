@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterator, List, Mapping, Optional, TypeVar, Union
+import logging
+from typing import Any, Dict, Iterator, List, Mapping, Optional
 
 import aiohttp
 
-T = TypeVar("T")
+from resting.utils import get_item, get_dict_value
+
+
+RESERVED_LABELS = ("last",)
+
+logger = logging.getLogger(__name__)
 
 
 class History(Mapping):
@@ -12,7 +18,9 @@ class History(Mapping):
         self._responses: Dict[str, Optional[aiohttp.ClientResponse]] = {}
         self._labels: List[str] = []
 
-    def __getitem__(self, key: Union[str, int]) -> Optional[aiohttp.ClientResponse]:
+    def __getitem__(self, key: str | int) -> Optional[aiohttp.ClientResponse]:
+        if key == "last":
+            return self.last
         if isinstance(key, int):
             key = self._labels[key]
         return self._responses[key]
@@ -28,16 +36,30 @@ class History(Mapping):
         return self[-1]
 
     def add(self, label: str):
+        try:
+            int(label)
+        except ValueError:
+            pass
+        else:
+            raise ValueError(f"label mustn't contain integer: {label!r}")
+        if label in RESERVED_LABELS:
+            raise ValueError(f"{label!r} is reserved label")
         label = self._label(label)
         self._labels.append(label)
         self._responses[label] = None
 
-    def store_current_response(self, response: aiohttp.ClientResponse):
+    async def store_current_response(self, response: aiohttp.ClientResponse):
+        logger.debug(
+            "Payload from %s %s received: %s bytes",
+            response.request_info.method,
+            response.request_info.url,
+            len(await response.read()),
+        )
         self._responses[self._labels[-1]] = response
 
     async def get_value_by_path(self, path: List[str]) -> Any:
         key, *path = path
-        response: aiohttp.ClientResponse = get_by_key_or_index(self, key)
+        response: aiohttp.ClientResponse = get_item(self, key)
         if not response:
             raise ValueError(f"No response '{key}' found")
         match path:
@@ -45,6 +67,10 @@ class History(Mapping):
                 return response.headers[header]
             case ["json", *rest]:
                 return get_dict_value(rest, await response.json())
+            case ["status"]:
+                return response.status
+            case ["reason"]:
+                return response.reason
 
     def _label(self, prefix):
         if prefix not in self._labels:
@@ -53,20 +79,3 @@ class History(Mapping):
         while f"{prefix}{counter}" in self._labels:
             counter += 1
         return f"{prefix}{counter}"
-
-
-def get_by_key_or_index(
-    data: Mapping[Union[str, int], T],
-    key: str,
-) -> T:
-    try:
-        return data[int(key)]
-    except ValueError:
-        return data[key]
-
-
-def get_dict_value(path: List[str], data: dict) -> Any:
-    while path:
-        key, *path = path
-        data = get_by_key_or_index(data, key)
-    return data

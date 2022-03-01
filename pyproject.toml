@@ -19,7 +19,7 @@ types-Pygments = "^2.9.16"
 types-PyYAML = "^6.0.4"
 
 [tool.poetry.scripts]
-resting-script = "resting.cli.script:main"
+resting-script = "resting.cli:main"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

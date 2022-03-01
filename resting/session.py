@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from sys import stderr, stdout
+from sys import stdout
 from typing import Optional, TextIO
 
 import aiohttp
@@ -9,6 +9,8 @@ from aiohttp.connector import Connection
 
 from resting.history import History
 from resting.output import request_printer, response_printer, VerboseLevel
+
+logger = logging.getLogger(__name__)
 
 
 class TCPConnector(aiohttp.TCPConnector):
@@ -27,7 +29,6 @@ class ClientSession(aiohttp.ClientSession):
         *args,
         verbose_level: int = VerboseLevel.FULL,
         print_stream: TextIO = stdout,
-        logs_stream: TextIO = stderr,
         connector: Optional[aiohttp.BaseConnector] = None,
         **kwargs,
     ):
@@ -43,10 +44,6 @@ class ClientSession(aiohttp.ClientSession):
         self._print_response = response_printer(print_stream, verbose_level)
         self._history = history
 
-        self._logger = logging.getLogger(__name__)
-        self._logger.addHandler(logging.StreamHandler(stream=logs_stream))
-        self._logger.setLevel(logging.INFO)
-
     async def __aenter__(self) -> ClientSession:
         return await super().__aenter__()  # type: ClientSession
 
@@ -60,5 +57,5 @@ class ClientSession(aiohttp.ClientSession):
         self._history.add(label)
         response = await super()._request(*args, **kwargs)
         await self._print_response(response)
-        self.history.store_current_response(response)
+        await self.history.store_current_response(response)
         return response

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from aiohttp import ClientRequest, ClientResponse
     from aiohttp.http_writer import HttpVersion
     from multidict import CIMultiDict
-    from typing import Dict, List, Mapping, Optional, Union, TextIO
+    from typing import Dict, List, Mapping, Optional, TextIO
     from yarl import URL
 
 
@@ -122,7 +122,7 @@ class StreamWriter(AbstractStreamWriter):
         raise NotImplementedError
 
 
-def print_json_data(fd: TextIO, data: Union[Dict, List]):
+def print_json_data(fd: TextIO, data: Dict | List):
     json_text = json.dumps(data, sort_keys=True, indent=2)
     if fd.isatty():
         formatter = formatters.TerminalFormatter()
@@ -130,7 +130,7 @@ def print_json_data(fd: TextIO, data: Union[Dict, List]):
     fd.write(f"{json_text}\n")
 
 
-def print_json(fd: TextIO, json_text: Union[str, bytes]):
+def print_json(fd: TextIO, json_text: str | bytes):
     print_json_data(fd, json.loads(json_text))
 
 
@@ -141,7 +141,7 @@ def print_html(fd: TextIO, html_text: str):
     fd.write(f"{html_text}\n")
 
 
-def print_payload(fd: TextIO, context_type: str, payload: Union[str, bytes]):
+def print_payload(fd: TextIO, context_type: str, payload: str | bytes):
     if not payload:
         return
     if "application/json" in context_type:
@@ -175,9 +175,7 @@ def print_response_status(fd: TextIO, version: HttpVersion, status: int, reason:
     fd.write(f"{protocol_text} {status_text}\n")
 
 
-def print_request_status(
-    fd: TextIO, version: HttpVersion, method: str, url: Union[URL, str]
-):
+def print_request_status(fd: TextIO, version: HttpVersion, method: str, url: URL | str):
     info_text = f"{url} HTTP/{version.major}.{version.minor}"
     if fd.isatty():
         info_text = font.bold(info_text)
