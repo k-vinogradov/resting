@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import logging
+from datetime import date, datetime
 from typing import Callable, Dict, Tuple, Optional, List, Any
 
 from multidict import CIMultiDict
@@ -38,19 +39,11 @@ class EmptyEnvironment(InvalidPath):
         return self.message
 
 
-class Header(BaseModel):
-    name: str
-    value: str
-
-    async def get(self, converter: Callable) -> Tuple[str, str]:
-        return await converter(self.name), await converter(self.value)
-
-
 class Step(BaseModel):
     label: str = "unnamed"
     method: str
     url: str
-    headers: List[Header] = Field(default_factory=list)
+    headers: Dict[str, Any] = Field(default_factory=dict)
     json_data: Optional[JSONData] = Field(None, alias="json")
     tests: List[Test] = Field(default_factory=list)
 
@@ -61,7 +54,12 @@ class Step(BaseModel):
         return await converter(self.url)
 
     async def get_headers(self, converter: Callable) -> Optional[CIMultiDict]:
-        return CIMultiDict([await header.get(converter) for header in self.headers])
+        return CIMultiDict(
+            [
+                (await converter(key), await converter(value))
+                for key, value in self.headers.items()
+            ]
+        )
 
     async def get_json_data(self, converter: Callable) -> Optional[JSONData]:
         return await converter(self.json_data)
@@ -114,7 +112,7 @@ def create_converter(
         if isinstance(value, dict):
             return {await convert(k): await convert(v) for k, v in value.items()}
         if isinstance(value, list):
-            return map(convert, value)
+            return [await convert(item) for item in value]
         if isinstance(value, str):
             substitutes = []
             for path in SUBSTITUTE.findall(value):
@@ -122,6 +120,8 @@ def create_converter(
             for sub, rep in substitutes:
                 value = value.replace(sub, str(rep))
             return value
+        if isinstance(value, datetime | date):
+            return value.isoformat()
         return value
 
     async def substitute(path):
