@@ -7,9 +7,9 @@ from enum import IntEnum
 import yaml
 
 from resting.errors import RestingError
-from resting.output import VerboseLevel
 from resting.script import Script
 from resting.session import ClientSession
+from resting.output import font
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +20,20 @@ class Exit(IntEnum):
     SCRIPT_FAILED = 2
 
 
+class LogHandler(logging.StreamHandler):
+    def format(self, record: logging.LogRecord) -> str:
+        s = super().format(record)
+        if self.stream.isatty():
+            if record.levelno >= logging.ERROR:
+                return font.red.bold(s)
+            elif record.levelno == logging.WARNING:
+                return font.yellow.bold(s)
+        return s
+
+
 def configure_logger(level: int):
     root_logger = logging.getLogger(__name__.split(".")[0])
-    root_logger.addHandler(logging.StreamHandler())
+    root_logger.addHandler(LogHandler())
     root_logger.setLevel(level)
 
 
@@ -33,16 +44,18 @@ def log_level(level: str):
     return level
 
 
-async def run(script: Script, verbose_level: VerboseLevel) -> int:
-    async with ClientSession(verbose_level=verbose_level) as session:
+async def run(script: Script, silent: bool) -> int:
+    async with ClientSession(silent=silent) as session:
         try:
             await script.process(session)
         except RestingError as exception:
-            logger.error(f"Script failed:\n  {exception}")
+            logger.error(exception)
         except Exception as exception:
-            logger.exception(f"Script failed:\n  {exception}")
+            logger.exception(exception)
         else:
             return Exit.SUCCESS
+    if silent:
+        await session.print_last_request()
     return Exit.SCRIPT_FAILED
 
 
@@ -67,24 +80,18 @@ def main():
         help=f"Script file loader ('{loader_names[0]}' is default)",
     )
 
-    verbose_levels = {
-        item.value: item.name.lower().replace("_", " ") for item in VerboseLevel
-    }
-    levels_description = ", ".join(
-        f"{key} - {value}" for key, value in verbose_levels.items()
+    parser.add_argument(
+        "-s",
+        "--silent",
+        action="store_true",
+        default=False,
+        help="Do not print success request",
     )
     parser.add_argument(
-        "--verbose",
-        type=int,
-        choices=verbose_levels.keys(),
-        default=VerboseLevel.FULL,
-        help=f"Requests/responses info verbose level ({levels_description}, "
-        f"default is {VerboseLevel.FULL})",
-    )
-    parser.add_argument(
+        "-l",
         "--log-level",
         type=log_level,
-        default=logging.getLevelName(logging.ERROR).lower(),
+        default="warning",
         help="Console logger level",
     )
 
@@ -93,7 +100,7 @@ def main():
 
     configure_logger(args.log_level)
     try:
-        logger.info("Load script from %s", args.script.name)
+        logger.info("Load script %s", args.script.name)
         script_config = LOADERS[args.loader](args.script)
         if not isinstance(script_config, dict):
             raise ValueError("Mapping structure is expected")
@@ -103,7 +110,7 @@ def main():
         sys.exit(Exit.INVALID_SCRIPT)
     finally:
         args.script.close()
-    sys.exit(asyncio.run(run(script, args.verbose)))
+    sys.exit(asyncio.run(run(script, args.silent)))
 
 
 if __name__ == "__main__":

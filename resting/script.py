@@ -3,12 +3,12 @@ from __future__ import annotations
 import re
 import logging
 from datetime import date, datetime
-from typing import Callable, Dict, Tuple, Optional, List, Any
+from typing import Callable, Dict, Optional, List, Any
 
 from multidict import CIMultiDict
 from pydantic import BaseModel, Field
 
-from resting.errors import InvalidPath, RestingError
+from resting import errors
 from resting.utils import get_dict_value
 from resting.session import ClientSession
 from resting.tests import Test
@@ -17,26 +17,6 @@ JSONData = list | dict
 SUBSTITUTE = re.compile(r"{(?P<path>[\w.-]+)}")
 
 logger = logging.getLogger(__name__)
-
-
-class FailedStepError(RestingError):
-    def __init__(self, step: Step, failed_step: int, total: int):
-        self.step = step
-        self.failed_step = failed_step
-        self.total = total
-
-    def __str__(self):
-        cause = f":\n  {self.__cause__}" if self.__cause__ else ""
-        return (
-            f"step {self.failed_step} of {self.total} {self.step.label!r} failed{cause}"
-        )
-
-
-class EmptyEnvironment(InvalidPath):
-    message = "empty environment"
-
-    def __str__(self):
-        return self.message
 
 
 class Step(BaseModel):
@@ -76,10 +56,13 @@ class Step(BaseModel):
         )
         async with request as _:
             for number, test in enumerate(self.tests, start=1):
-                logger.debug(
-                    "Run test '%s' (%s of %s)", test.name, number, len(self.tests)
+                logger.info(
+                    "Check test %s of %s: %r", number, len(self.tests), test.name
                 )
-                await test.run(session, converter, environment)
+                try:
+                    await test.run(session, converter, environment)
+                except AssertionError as exc:
+                    raise errors.TestError(test=test, step=self) from exc
 
 
 class Script(BaseModel):
@@ -89,19 +72,15 @@ class Script(BaseModel):
     async def process(self, session: ClientSession):
         converter = create_converter(session, self.environment)
         logger.info("Start script processing")
-        for number, step in enumerate(self.steps, 1):
-            logger.info("%s of %s: %s", number, len(self.steps), step.label)
+        for step in self.steps:
+            logger.info("Run step %r", step.label)
             try:
                 await step.process(session, converter, self.environment)
-            except RestingError as exception:
-                raise FailedStepError(
-                    step=step, failed_step=number, total=len(self.steps)
-                ) from exception
+            except errors.RestingError as exception:
+                raise errors.FailedStepError(step=step, script=self) from exception
             except Exception as exception:
                 logger.exception("Unexpected error on script processing")
-                raise FailedStepError(
-                    step=step, failed_step=number, total=len(self.steps)
-                ) from exception
+                raise errors.FailedStepError(step=step, script=self) from exception
         logger.info("Script processing complete")
 
 
@@ -114,6 +93,8 @@ def create_converter(
         if isinstance(value, list):
             return [await convert(item) for item in value]
         if isinstance(value, str):
+            if value.startswith("_path_:"):
+                return await substitute(value[len("_path_:") :])
             substitutes = []
             for path in SUBSTITUTE.findall(value):
                 substitutes.append((f"{{{path}}}", await substitute(path)))
@@ -130,9 +111,9 @@ def create_converter(
                 try:
                     return get_dict_value(rest, environment)
                 except LookupError as exception:
-                    raise InvalidPath(path, exception.args[0])
+                    raise errors.InvalidPath(path, exception.args[0])
             case ["history", *rest]:
                 return await session.history.get_value_by_path(rest)
-        raise InvalidPath(path)
+        raise errors.InvalidPath(path)
 
     return convert

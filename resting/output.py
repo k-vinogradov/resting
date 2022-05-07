@@ -2,26 +2,20 @@
 from __future__ import annotations
 
 import json
-from enum import IntEnum
-from typing import TYPE_CHECKING
+from typing import Awaitable, Callable, Optional, TYPE_CHECKING
 
+import aiohttp
 from aiohttp import hdrs, Payload
 from aiohttp.abc import AbstractStreamWriter
 from pygments import highlight, lexers, formatters
 
 if TYPE_CHECKING:
-    from aiohttp import ClientRequest, ClientResponse
     from aiohttp.http_writer import HttpVersion
     from multidict import CIMultiDict
     from typing import Dict, List, Mapping, Optional, TextIO
     from yarl import URL
 
-
-class VerboseLevel(IntEnum):
-    NO_OUTPUT = 0
-    STATUS_ONLY = 1
-    NO_HEADERS = 2
-    FULL = 3
+    from resting.session import RequestInfo
 
 
 class Color:
@@ -127,7 +121,7 @@ def print_json_data(fd: TextIO, data: Dict | List):
     if fd.isatty():
         formatter = formatters.TerminalFormatter()
         json_text = highlight(json_text, lexers.JsonLexer(), formatter)
-    fd.write(f"{json_text}\n")
+    fd.write(f"{json_text}")
 
 
 def print_json(fd: TextIO, json_text: str | bytes):
@@ -183,36 +177,36 @@ def print_request_status(fd: TextIO, version: HttpVersion, method: str, url: URL
     fd.write(f"{method} {info_text}\n")
 
 
-def response_printer(fd: TextIO, verbose_level: int = VerboseLevel.FULL):
-    async def print_(response: ClientResponse):
-        if verbose_level == VerboseLevel.NO_OUTPUT:
-            return
-        print_response_status(fd, response.version, response.status, response.reason)  # type: ignore
-        if verbose_level > VerboseLevel.NO_HEADERS:
-            print_headers(fd, response.headers)
-        fd.write("\n")
-        print_payload(fd, response.content_type, await response.text())
-        fd.write("\n")
+async def print_request(request: aiohttp.ClientRequest, fd: TextIO):
+    fd.write("\n")
+    print_request_status(fd, request.version, request.method, request.url)
+    print_headers(fd, request.headers)
+    fd.write("\n")
+    body = request.body
+    content_type = "application/octet-stream"
+    if isinstance(body, Payload):
+        content_type = body.content_type
+        writer = StreamWriter()
+        await body.write(writer)
+        body = writer.data
+    print_payload(fd, content_type, body)
+    fd.write("\n")
 
-    return print_
+
+async def print_response(response: aiohttp.ClientResponse, fd: TextIO):
+    fd.write("\n")
+    print_response_status(fd, response.version, response.status, response.reason)  # type: ignore
+    print_headers(fd, response.headers)
+    fd.write("\n")
+    print_payload(fd, response.content_type, await response.text())
+    fd.write("\n")
 
 
-def request_printer(fd: TextIO, verbose_level: int = VerboseLevel.FULL):
-    async def print_(request: ClientRequest):
-        if verbose_level == VerboseLevel.NO_OUTPUT:
-            return
-        print_request_status(fd, request.version, request.method, request.url)
-        if verbose_level > VerboseLevel.NO_HEADERS:
-            print_headers(fd, request.headers)
-        fd.write("\n")
-        body = request.body
-        content_type = "application/octet-stream"
-        if isinstance(body, Payload):
-            content_type = body.content_type
-            writer = StreamWriter()
-            await body.write(writer)
-            body = writer.data
-        print_payload(fd, content_type, body)
-        fd.write("\n")
+def create_printer(fd: TextIO) -> Callable[[RequestInfo], Awaitable[None]]:
+    async def print_(request_info: RequestInfo):
+        if request_info.request:
+            await print_request(request_info.request, fd)
+        if request_info.response:
+            await print_response(request_info.response, fd)
 
     return print_

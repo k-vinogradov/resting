@@ -3,39 +3,19 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from resting.errors import RestingError
-from resting.session import ClientSession
+if TYPE_CHECKING:
+    from resting import ClientSession
 
 logger = logging.getLogger(__name__)
 
 
-class TestError(RestingError):
-    def __init__(self, test: BaseTest, message: str):
-        self.test = test
-        self.message = message
-
-    def __str__(self):
-        return f"test {self.test.name!r} failed: {self.message}"
-
-
 class BaseTest(ABC, BaseModel):
-    async def run(
-        self,
-        session: ClientSession,
-        converter: Callable[[Any], Any],
-        environment: Dict[str, Any],
-    ):
-        try:
-            await self._assert(session, converter, environment)
-        except AssertionError as exception:
-            raise TestError(self, str(exception))
-
     @abstractmethod
-    async def _assert(
+    async def run(
         self,
         session: ClientSession,
         converter: Callable[[Any], Any],
@@ -51,7 +31,7 @@ class BaseTest(ABC, BaseModel):
 class Sleep(BaseTest):
     sleep: float | int | str
 
-    async def _assert(
+    async def run(
         self,
         session: ClientSession,
         converter: Callable[[Any], Any],
@@ -65,21 +45,37 @@ class Sleep(BaseTest):
 class Status(BaseTest):
     status: int | str
 
-    async def _assert(
+    async def run(
         self,
         session: ClientSession,
         converter: Callable[[Any], Any],
         environment: Dict[str, Any],
     ):
+        assert session.history.last, "no last request found"
         status = session.history.last.status
         expected = int(await converter(self.status))
         assert status == expected, f"response status {status} but {expected} expected"
 
 
+class Equal(BaseTest):
+    eq: list
+
+    async def run(
+        self,
+        session: ClientSession,
+        converter: Callable[[Any], Any],
+        environment: Dict[str, Any],
+    ):
+        assert len(self.eq) == 2, "only two items can be compared"
+        a, b = [await converter(value) for value in self.eq]
+        # TODO: readable diff output
+        assert a == b, f"items are not equal:\n{a}\n{b}"
+
+
 class UpdateEnvironment(BaseTest):
     update_environment: dict
 
-    async def _assert(
+    async def run(
         self,
         session: ClientSession,
         converter: Callable[[Any], Any],
@@ -89,4 +85,11 @@ class UpdateEnvironment(BaseTest):
             environment[await converter(key)] = await converter(value)
 
 
-Test = Sleep | Status | UpdateEnvironment
+class Print(BaseTest):
+    print: str
+
+    async def run(self, session, converter, environment):
+        logger.warning(await converter(self.print))
+
+
+Test = Sleep | Status | UpdateEnvironment | Print | Equal

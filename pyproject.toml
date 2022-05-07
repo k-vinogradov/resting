@@ -17,6 +17,7 @@ pytest = "^7.0.1"
 black = "^22.1.0"
 types-Pygments = "^2.9.16"
 types-PyYAML = "^6.0.4"
+mypy = "^0.942"
 
 [tool.poetry.scripts]
 resting-script = "resting.cli:main"

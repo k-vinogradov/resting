@@ -35,27 +35,28 @@ class History(Mapping):
     def last(self) -> Optional[aiohttp.ClientResponse]:
         return self[-1]
 
-    def add(self, label: str):
+    @property
+    def last_label(self) -> Optional[str]:  # type: ignore
+        if self._labels:
+            return self._labels[-1]
+
+    async def add(self, label: str, response: aiohttp.ClientResponse):
         try:
             int(label)
+            raise ValueError(f"label mustn't contain integer: {label!r}")
         except ValueError:
             pass
-        else:
-            raise ValueError(f"label mustn't contain integer: {label!r}")
         if label in RESERVED_LABELS:
             raise ValueError(f"{label!r} is reserved label")
         label = self._label(label)
         self._labels.append(label)
-        self._responses[label] = None
-
-    async def store_current_response(self, response: aiohttp.ClientResponse):
         logger.debug(
             "Payload from %s %s received: %s bytes",
             response.request_info.method,
             response.request_info.url,
             len(await response.read()),
         )
-        self._responses[self._labels[-1]] = response
+        self._responses[label] = response
 
     async def get_value_by_path(self, path: List[str]) -> Any:
         key, *path = path
