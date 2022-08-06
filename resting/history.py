@@ -66,6 +66,8 @@ class History(Mapping):
         match path:
             case ["headers", header]:
                 return response.headers[header]
+            case ["cookies", name]:
+                return response.cookies[name].value
             case ["json", *rest]:
                 return get_dict_value(rest, await response.json())
             case ["status"]:
