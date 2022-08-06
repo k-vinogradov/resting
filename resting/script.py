@@ -93,6 +93,9 @@ def create_converter(
         if isinstance(value, list):
             return [await convert(item) for item in value]
         if isinstance(value, str):
+            if value.startswith("_input_:"):
+                name = value[len("_input_:") :]
+                return input(f"Enter '{name}' value: ")
             if value.startswith("_path_:"):
                 return await substitute(value[len("_path_:") :])
             substitutes = []
