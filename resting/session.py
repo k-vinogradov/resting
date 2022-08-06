@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from sys import stdout
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 import aiohttp
 from aiohttp.connector import Connection
