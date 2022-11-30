@@ -26,6 +26,7 @@ class Step(BaseModel):
     headers: Dict[str, Any] = Field(default_factory=dict)
     json_data: Optional[JSONData] = Field(None, alias="json")
     tests: List[Test] = Field(default_factory=list)
+    data: Optional[str]
 
     async def get_method(self, converter: Callable) -> str:
         return await converter(self.method)
@@ -47,12 +48,18 @@ class Step(BaseModel):
     async def process(
         self, session: ClientSession, converter: Callable, environment: Dict[str, Any]
     ):
+        kwargs = {}
+        if self.json_data:
+            kwargs["json"] = await self.get_json_data(converter)
+        elif self.data:
+            data = await converter(self.data)
+            kwargs["data"] = data.encode() if isinstance(data, str) else data
         request = session.request(
             method=await self.get_method(converter),
             url=await self.get_url(converter),
             label=self.label,
             headers=await self.get_headers(converter),
-            json=await self.get_json_data(converter),
+            **kwargs,
         )
         async with request as _:
             for number, test in enumerate(self.tests, start=1):
@@ -98,6 +105,9 @@ def create_converter(
                 return input(f"Enter '{name}' value: ")
             if value.startswith("_path_:"):
                 return await substitute(value[len("_path_:") :])
+            if value.startswith("_file_:"):
+                with open(value[len("_file_:") :], "rb") as fp:
+                    return fp.read()
             substitutes = []
             for path in SUBSTITUTE.findall(value):
                 substitutes.append((f"{{{path}}}", await substitute(path)))
